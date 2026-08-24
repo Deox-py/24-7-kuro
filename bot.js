@@ -1,12 +1,13 @@
 const mineflayer = require('mineflayer');
 
 function createBot() {
-    const bot = mineflayer.createBot({
-        host: 'Fakekuromori.aternos.me', // <--- REEMPLAZA ESTO POR LA IP DE TU SERVER
-        port: 67676,                // Puerto predeterminado de Minecraft
-        username: 'PokeFollador',    // Nombre genérico del bot/NPC dentro del juego
-        version: false              // Autodetecta la versión exacta del servidor (1.8 a 1.21+)
-    });
+       const bot = mineflayer.createBot({
+    host: 'Fakekuromori.aternos.me',   // ← Verifica que sea la IP correcta de Aternos
+    port: 25565,                       // ← CAMBIA ESTO por el puerto real que te da Aternos
+    username: 'PokeFollador',
+    version: false,
+    auth: 'offline'                    // ← IMPRESCINDIBLE para servidores no-premium
+});
 
     bot.on('spawn', () => {
         console.log(`[NPC] El bot ha aparecido correctamente en el mapa.`);
