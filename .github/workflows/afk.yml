@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    # Se ejecuta automáticamente cada 5 horas
+    # Se ejecuta automáticamente cada 5 horas para reiniciar el ciclo
     - cron: '0 */5 * * *'
 
 jobs:
@@ -18,12 +18,10 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: 'npm'
+          node-version: 20
 
       - name: Instalar dependencias
-        run: npm ci || npm install mineflayer minecraft-protocol-forge mineflayer-pathfinder
+        run: npm install mineflayer minecraft-protocol-forge mineflayer-pathfinder
 
-      - name: Ejecutar script del NPC (Límite 5 Horas)
-        # timeout corta la ejecución limpiamente a las 5 horas antes de la cancelación de GitHub
+      - name: Ejecutar script del NPC (Límite de 5 Horas)
         run: timeout 5h node bot.js || true
