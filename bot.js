@@ -3,7 +3,7 @@ const mineflayer = require('mineflayer');
 function createBot() {
        const bot = mineflayer.createBot({
     host: 'Fakekuromori.aternos.me',   // ← Verifica que sea la IP correcta de Aternos
-    port: 25565,                       // ← CAMBIA ESTO por el puerto real que te da Aternos
+    port: 31094,                       // ← CAMBIA ESTO por el puerto real que te da Aternos
     username: 'PokeFollador',
     version: false,
     auth: 'offline'                    // ← IMPRESCINDIBLE para servidores no-premium
