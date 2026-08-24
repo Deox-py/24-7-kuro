@@ -5,7 +5,7 @@ const { GoalBlock } = goals;
 
 const CONFIG = {
     host: 'Fakekuromori.aternos.me',
-    port: 31094, // ⚠️ Actualiza este puerto si cambia en Aternos
+    port: 31094, // ⚠️ Revisa que coincida con el puerto activo de Aternos
     username: 'PokeFollador',
     auth: 'offline',
     version: false,
@@ -39,7 +39,7 @@ function createBot() {
     let sleepInterval = null;
     let isSleeping = false;
 
-    // Filter chat packets
+    // Filtro de paquetes de chat para prevenir cierres
     bot._client.on('packet', (data, meta) => {
         if (['chat_message', 'system_chat', 'player_chat'].includes(meta.name)) {
             try {
@@ -96,12 +96,12 @@ function createBot() {
     });
 
     bot.on('end', (reason) => {
-        console.log(`[NPC] ❌ Desconectado (${reason}). Reintentando en 30s...`);
+        console.log(`[NPC] ❌ Desconectado (${reason}). Reintentando en 60s...`);
         cleanup();
         scheduleReconnect();
     });
 
-    // ---- Lógica de Comportamiento Anti-AFK ----
+    // ---- Lógica Anti-AFK Segura ----
 
     function startActions() {
         if (actionInterval) clearInterval(actionInterval);
@@ -110,58 +110,35 @@ function createBot() {
 
             const rand = Math.random();
 
-            // 1. Saltar (30% probabilidad)
-            if (rand < 0.3) {
+            if (rand < 0.35) {
+                // Salto aleatorio
                 bot.setControlState('jump', true);
                 setTimeout(() => {
                     if (bot && bot.setControlState) bot.setControlState('jump', false);
                 }, 300);
                 console.log('[NPC] 🦘 Salto aleatorio.');
-            } 
-            // 2. Mirar alrededor (30% probabilidad)
-            else if (rand < 0.6) {
+            } else if (rand < 0.70) {
+                // Mirar alrededor
                 const yaw = (Math.random() - 0.5) * Math.PI * 2;
                 const pitch = (Math.random() - 0.5) * 0.5;
                 bot.look(yaw, pitch, true).catch(() => {});
                 console.log('[NPC] 👀 Miró a su alrededor.');
-            } 
-            // 3. Interactuar con Cofre u Horno cercano (40% probabilidad)
-            else {
-                await interactWithBlocks();
+            } else {
+                // Inspeccionar bloques cercanos de forma segura (sin abrir inventarios)
+                inspectNearbyBlock();
             }
-        }, 15000 + Math.random() * 10000);
+        }, 20000 + Math.random() * 10000);
     }
 
-    async function interactWithBlocks() {
-        // Buscar un cofre u horno cercano (máximo a 4 bloques de distancia)
+    function inspectNearbyBlock() {
         const targetBlock = bot.findBlock({
-            matching: (block) => block.name.includes('chest') || block.name.includes('furnace'),
-            maxDistance: 4
+            matching: (block) => block.name.includes('chest') || block.name.includes('furnace') || block.name.endsWith('_bed'),
+            maxDistance: 5
         });
 
-        if (!targetBlock) {
-            console.log('[NPC] 💤 Sin bloques de interacción cerca, descansando...');
-            return;
-        }
-
-        try {
-            if (targetBlock.name.includes('chest')) {
-                console.log('[NPC] 📦 Abriendo cofre...');
-                const chest = await bot.openContainer(targetBlock);
-                setTimeout(() => {
-                    chest.close();
-                    console.log('[NPC] 📦 Cofre cerrado.');
-                }, 2000);
-            } else if (targetBlock.name.includes('furnace')) {
-                console.log('[NPC] 🔥 Inspeccionando horno...');
-                const furnace = await bot.openFurnace(targetBlock);
-                setTimeout(() => {
-                    furnace.close();
-                    console.log('[NPC] 🔥 Horno cerrado.');
-                }, 2000);
-            }
-        } catch (err) {
-            console.log('[NPC] ⚠️ No se pudo interactuar con el bloque:', err.message);
+        if (targetBlock) {
+            console.log(`[NPC] 🔍 Inspeccionando ${targetBlock.name}...`);
+            bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5)).catch(() => {});
         }
     }
 
@@ -189,7 +166,7 @@ function createBot() {
                 if (dist < 2) {
                     clearInterval(moveInterval);
                     console.log('[NPC] 🟢 Destino alcanzado.');
-                    setTimeout(() => moveRandomly(), 10000 + Math.random() * 10000);
+                    setTimeout(() => moveRandomly(), 12000 + Math.random() * 10000);
                 }
             }, 2000);
         } catch (_) {
@@ -242,7 +219,7 @@ function createBot() {
         setTimeout(() => {
             isReconnecting = false;
             createBot();
-        }, 30000);
+        }, 60000); // Reconecta cada 60s para no saturar Aternos
     }
 }
 
