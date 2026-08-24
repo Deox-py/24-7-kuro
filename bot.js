@@ -7,24 +7,30 @@ const { GoalBlock } = require('mineflayer-pathfinder').goals;
 // ==================== CONFIGURACIÓN ====================
 const CONFIG = {
     host: 'Fakekuromori.aternos.me',
-    port: 31094, // ⚠️ ACTUALIZA ESTE PUERTO
+    port: 31094, // ⚠️ ACTUALIZA ESTE PUERTO CADA VEZ QUE CAMBIE
     username: 'PokeFollador',
     auth: 'offline',
     version: false,
     hideErrors: true,
-    homeRadius: 5,
+    homeRadius: 5, // Radio de movimiento dentro de la casa
 };
 
-// ==================== LISTA COMPLETA DE ÍTEMS COCINABLES ====================
+// ==================== LISTA COMPLETA DE ÍTEMS COCINABLES (VANILLA) ====================
 const COOKABLE_ITEMS = [
+    // Carnes
     'raw_beef', 'raw_porkchop', 'raw_chicken', 'raw_rabbit', 'raw_mutton',
+    // Pescados
     'cod', 'salmon',
+    // Minerales
     'raw_iron', 'raw_gold', 'raw_copper',
+    // Vegetales
     'potato'
 ];
 
+// Combustible (solo carbón vanilla)
 const FUEL_ITEM = 'coal';
 
+// Mapeo de resultados (para logs y saber qué se ha cocinado)
 const COOK_RESULT = {
     'raw_beef': 'cooked_beef',
     'raw_porkchop': 'cooked_porkchop',
@@ -61,10 +67,13 @@ function createBot() {
     let isSleeping = false;
     let isCooking = false;
 
-    // ==================== PARCH PARA CHAT ====================
+    // ==================== PARCH PARA CHAT (evita error "unknown chat format") ====================
     bot._client.on('packet', (data, meta) => {
         if (meta.name === 'chat_message' || meta.name === 'system_chat' || meta.name === 'player_chat') {
-            try { console.log(`[CHAT] ${data.message || data.plainMessage || JSON.stringify(data)}`); } catch (e) {}
+            try {
+                const msg = data.message || data.plainMessage || JSON.stringify(data);
+                console.log(`[CHAT] ${msg}`);
+            } catch (e) { /* ignorar */ }
         }
     });
     bot.on('message', () => {});
@@ -94,6 +103,7 @@ function createBot() {
         }, 3000);
     });
 
+    // Manejar errores sin crashear
     bot.on('error', (err) => {
         if (err.code === 'ECONNRESET' || err.code === 'ENOTFOUND') {
             console.log('[NPC] ❌ Error de conexión. Reintentando...');
@@ -104,7 +114,7 @@ function createBot() {
             console.log('[NPC] ⚠️ Error de formato de chat (mods), ignorando...');
         } else {
             console.log('[NPC] ❌ Error crítico:', err);
-            // En lugar de crashear, intentamos reconectar
+            // Intentar reconectar en lugar de crashear
             setTimeout(() => createBot(), 30000);
         }
     });
@@ -116,6 +126,8 @@ function createBot() {
     });
 
     // ==================== FUNCIONES BÁSICAS ====================
+
+    // Acciones periódicas (saltar, mirar, descansar)
     function startActions() {
         if (actionInterval) clearInterval(actionInterval);
         actionInterval = setInterval(() => {
@@ -136,22 +148,20 @@ function createBot() {
         }, 15000 + Math.random() * 10000);
     }
 
+    // Movimiento aleatorio dentro del radio de la casa (sin usar blockAt)
     function moveRandomly() {
         if (!bot || !bot.entity || !bot.pathfinder || isSleeping || isCooking) {
-            // Si no se puede mover ahora, intentar de nuevo en unos segundos
             setTimeout(() => moveRandomly(), 5000);
             return;
         }
+
         const range = CONFIG.homeRadius;
         const pos = bot.entity.position;
         const x = pos.x + (Math.random() - 0.5) * range * 2;
         const z = pos.z + (Math.random() - 0.5) * range * 2;
-        // Usamos la y actual, el pathfinder se encargará de encontrar el suelo
+        // Usamos la altura actual y dejamos que pathfinder encuentre el suelo
         const target = { x, y: pos.y, z };
-        moveToTarget(target);
-    }
 
-    function moveToTarget(target) {
         try {
             bot.pathfinder.setGoal(new GoalBlock(target.x, target.y, target.z));
             if (moveInterval) clearInterval(moveInterval);
@@ -219,7 +229,7 @@ function createBot() {
         }, 30000);
     }
 
-    // ==================== RUTINA DE COCINA ====================
+    // ==================== RUTINA DE COCINA (COMPLETA) ====================
     async function startCookingRoutine() {
         if (cookingInterval) clearInterval(cookingInterval);
         cookingInterval = setInterval(async () => {
@@ -245,7 +255,6 @@ function createBot() {
                     maxDistance: 5,
                     count: 10
                 });
-
                 if (chestBlocks.length === 0) {
                     console.log('[NPC] ⚠️ No hay cofres cerca.');
                     isCooking = false;
@@ -284,7 +293,6 @@ function createBot() {
                     isCooking = false;
                     return;
                 }
-
                 if (fuelItems.length === 0) {
                     console.log('[NPC] ⚠️ No hay carbón disponible.');
                     isCooking = false;
@@ -334,7 +342,6 @@ function createBot() {
 
                 // 5. Abrir horno y cocinar
                 const furnace = await bot.openFurnace(furnaceBlock);
-
                 if (furnace.outputSlot().count > 0) {
                     await bot.moveSlotItem(furnace.outputSlot().slot, 0, 36);
                     console.log(`[NPC] ✅ Extraído ${furnace.outputSlot().name} del horno`);
@@ -360,13 +367,14 @@ function createBot() {
                         break;
                     }
                 }
-
                 furnace.close();
 
+                // 6. Esperar a que se cocine
                 const waitTime = Math.max(5000, cookedCount * 3000);
                 console.log(`[NPC] ⏳ Esperando ${Math.round(waitTime/1000)} segundos...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
 
+                // 7. Extraer resultado
                 const furnace2 = await bot.openFurnace(furnaceBlock);
                 const result = furnace2.outputSlot();
                 if (result && result.count > 0) {
@@ -375,6 +383,7 @@ function createBot() {
                 }
                 furnace2.close();
 
+                // 8. Guardar en un cofre
                 const depositChest = bot.findBlock({
                     matching: (block) => block.name === 'chest' || block.name === 'trapped_chest' || block.name === 'barrel',
                     maxDistance: 5
@@ -406,6 +415,7 @@ function createBot() {
         }, 30000 + Math.random() * 30000);
     }
 
+    // ==================== DETENER TODO ====================
     function stopAll() {
         if (actionInterval) clearInterval(actionInterval);
         if (moveInterval) clearInterval(moveInterval);
