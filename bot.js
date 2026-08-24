@@ -7,33 +7,48 @@ const { GoalBlock } = require('mineflayer-pathfinder').goals;
 // ==================== CONFIGURACIÓN ====================
 const CONFIG = {
     host: 'Fakekuromori.aternos.me',
-    port: 31094, // ⚠️ ACTUALIZA ESTE PUERTO CON EL DE ATERNOS
+    port: 31094, // ⚠️ ACTUALIZA ESTE PUERTO
     username: 'PokeFollador',
     auth: 'offline',
     version: false,
     hideErrors: true,
-    // Items que se pueden cocinar (nombres en Minecraft)
-    cookableItems: [
-        'raw_iron', 'raw_gold', 'raw_copper', 'raw_beef', 'raw_chicken',
-        'raw_porkchop', 'raw_mutton', 'raw_rabbit', 'cod', 'salmon',
-        'tropical_fish', 'pufferfish', 'potato', 'wet_sponge',
-        'cobblestone', 'sand', 'clay_ball', 'netherrack'
-    ],
-    // Combustibles
-    fuelItems: [
-        'coal', 'charcoal', 'wood', 'oak_log', 'birch_log', 'spruce_log',
-        'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log',
-        'crimson_stem', 'warped_stem', 'coal_block', 'dried_kelp_block',
-        'blaze_rod', 'lava_bucket'
-    ],
-    // Distancia máxima para buscar cofres/hornos
-    searchRadius: 8,
-    // Cofre donde guardar los resultados (opcional, si no se especifica usa el mismo)
-    outputChestPosition: null // Ej: {x: 10, y: 64, z: 20}
+    homeRadius: 5,
 };
 
+// ==================== LISTA COMPLETA DE ÍTEMS COCINABLES ====================
+// Los ítems que el bot buscará para cocinar
+const COOKABLE_ITEMS = [
+    // Carnes
+    'raw_beef', 'raw_porkchop', 'raw_chicken', 'raw_rabbit', 'raw_mutton',
+    // Pescados
+    'cod', 'salmon',
+    // Minerales
+    'raw_iron', 'raw_gold', 'raw_copper',
+    // Vegetales
+    'potato'
+];
+
+// Combustible (solo carbón vanilla)
+const FUEL_ITEM = 'coal';
+
+// Mapeo de qué produce cada item (para logs)
+const COOK_RESULT = {
+    'raw_beef': 'cooked_beef',
+    'raw_porkchop': 'cooked_porkchop',
+    'raw_chicken': 'cooked_chicken',
+    'raw_rabbit': 'cooked_rabbit',
+    'raw_mutton': 'cooked_mutton',
+    'cod': 'cooked_cod',
+    'salmon': 'cooked_salmon',
+    'raw_iron': 'iron_ingot',
+    'raw_gold': 'gold_ingot',
+    'raw_copper': 'copper_ingot',
+    'potato': 'baked_potato'
+};
+
+// ==================== CREACIÓN DEL BOT ====================
 function createBot() {
-    console.log('[NPC] 🚀 Iniciando bot cocinero...');
+    console.log('[NPC] 🚀 Iniciando bot cocinero (completo)...');
 
     const bot = mineflayer.createBot({
         host: CONFIG.host,
@@ -46,16 +61,17 @@ function createBot() {
 
     bot.loadPlugin(pathfinder);
 
-    let isProcessing = false;
-    let checkInterval = null;
+    let moveInterval = null;
+    let actionInterval = null;
+    let sleepInterval = null;
+    let cookingInterval = null;
+    let isSleeping = false;
+    let isCooking = false;
 
     // ==================== PARCH PARA CHAT ====================
     bot._client.on('packet', (data, meta) => {
         if (meta.name === 'chat_message' || meta.name === 'system_chat' || meta.name === 'player_chat') {
-            try {
-                const msg = data.message || data.plainMessage || JSON.stringify(data);
-                console.log(`[CHAT] ${msg}`);
-            } catch (e) { /* ignorar */ }
+            try { console.log(`[CHAT] ${data.message || data.plainMessage || JSON.stringify(data)}`); } catch (e) {}
         }
     });
     bot.on('message', () => {});
@@ -66,8 +82,6 @@ function createBot() {
 
     bot.on('spawn', () => {
         console.log('[NPC] 🟢 Bot apareció en el mapa.');
-
-        // Configurar pathfinder (sin romper bloques)
         try {
             const mcData = require('minecraft-data')(bot.version);
             const defaultMove = new Movements(bot, mcData);
@@ -79,13 +93,14 @@ function createBot() {
             console.log('[NPC] ⚠️ Error configurando pathfinder:', err.message);
         }
 
-        // Iniciar el ciclo de cocina después de 5 segundos
         setTimeout(() => {
-            startCookingCycle();
-        }, 5000);
+            startActions();
+            moveRandomly();
+            startSleepRoutine();
+            startCookingRoutine();
+        }, 3000);
     });
 
-    // Manejar errores
     bot.on('error', (err) => {
         if (err.code === 'ECONNRESET' || err.code === 'ENOTFOUND') {
             console.log('[NPC] ❌ Error de conexión. Reintentando...');
@@ -101,238 +116,331 @@ function createBot() {
 
     bot.on('end', (reason) => {
         console.log(`[NPC] ❌ Desconectado: ${reason}. Reconectando en 30s...`);
-        if (checkInterval) clearInterval(checkInterval);
+        stopAll();
         setTimeout(() => createBot(), 30000);
     });
 
-    // ==================== FUNCIONES DE COCINA ====================
-
-    function startCookingCycle() {
-        if (checkInterval) clearInterval(checkInterval);
-        // Verificar cada 30 segundos si hay trabajo pendiente
-        checkInterval = setInterval(async () => {
-            if (isProcessing || !bot || !bot.entity) return;
-            await processCooking();
-        }, 30000);
-        // Ejecutar inmediatamente la primera vez
-        setTimeout(async () => {
-            if (!isProcessing) await processCooking();
-        }, 3000);
+    // ==================== FUNCIONES BÁSICAS ====================
+    function startActions() {
+        if (actionInterval) clearInterval(actionInterval);
+        actionInterval = setInterval(() => {
+            if (!bot || !bot.entity || isSleeping || isCooking) return;
+            const rand = Math.random();
+            if (rand < 0.3) {
+                bot.setControlState('jump', true);
+                setTimeout(() => bot.setControlState('jump', false), 300);
+                console.log('[NPC] 🦘 Saltó');
+            } else if (rand < 0.6) {
+                const yaw = (Math.random() - 0.5) * Math.PI * 2;
+                const pitch = (Math.random() - 0.5) * 0.5;
+                bot.look(yaw, pitch, true);
+                console.log('[NPC] 👀 Miró alrededor');
+            } else {
+                console.log('[NPC] 💤 Descansando...');
+            }
+        }, 15000 + Math.random() * 10000);
     }
 
-    async function processCooking() {
-        if (isProcessing) return;
-        isProcessing = true;
+    function moveRandomly() {
+        if (!bot || !bot.entity || !bot.pathfinder || isSleeping || isCooking) return;
+        const range = CONFIG.homeRadius;
+        const pos = bot.entity.position;
+        const x = pos.x + (Math.random() - 0.5) * range * 2;
+        const z = pos.z + (Math.random() - 0.5) * range * 2;
+        let y = pos.y;
+        for (let dy = 0; dy > -3; dy--) {
+            const block = bot.blockAt({ x: Math.floor(x), y: Math.floor(y + dy), z: Math.floor(z) });
+            if (block && block.name !== 'air' && block.name !== 'water' && block.name !== 'lava') {
+                y = y + dy + 1;
+                break;
+            }
+        }
+        moveToTarget({ x, y, z });
+    }
 
+    function moveToTarget(target) {
         try {
-            console.log('[NPC] 🔍 Buscando materiales para cocinar...');
+            bot.pathfinder.setGoal(new GoalBlock(target.x, target.y, target.z));
+            if (moveInterval) clearInterval(moveInterval);
+            moveInterval = setInterval(() => {
+                if (!bot || !bot.entity || isSleeping || isCooking) {
+                    clearInterval(moveInterval);
+                    return;
+                }
+                const dist = bot.entity.position.distanceTo(target);
+                if (dist < 2) {
+                    clearInterval(moveInterval);
+                    console.log('[NPC] 🟢 Llegó al destino');
+                    setTimeout(() => moveRandomly(), 10000 + Math.random() * 10000);
+                }
+            }, 2000);
+        } catch (err) {
+            console.log(`[NPC] ⚠️ Error moviéndose: ${err.message}`);
+            setTimeout(() => moveRandomly(), 5000);
+        }
+    }
 
-            // 1. Buscar un cofre con materiales para cocinar o combustible
-            const chest = await findChestWithItems();
-            if (!chest) {
-                console.log('[NPC] ⚠️ No encontró cofre con materiales para cocinar.');
-                isProcessing = false;
-                return;
+    // ==================== DORMIR ====================
+    function startSleepRoutine() {
+        if (sleepInterval) clearInterval(sleepInterval);
+        sleepInterval = setInterval(async () => {
+            if (!bot || !bot.entity || isSleeping || isCooking) return;
+            const time = bot.time.timeOfDay || 0;
+            if (time > 13000 && time < 23000) {
+                console.log('[NPC] 🌙 Es de noche, buscando cama...');
+                try {
+                    const bedBlock = bot.findBlock({
+                        matching: (block) => block.name.includes('bed'),
+                        maxDistance: 5
+                    });
+                    if (bedBlock) {
+                        await bot.sleep(bedBlock);
+                        isSleeping = true;
+                        console.log('[NPC] 😴 Durmiendo...');
+                        const wakeUp = () => {
+                            if (isSleeping) {
+                                try { bot.wake(); } catch (e) {}
+                                isSleeping = false;
+                                console.log('[NPC] 🌅 Despertado');
+                                setTimeout(() => moveRandomly(), 2000);
+                            }
+                        };
+                        const checkTime = setInterval(() => {
+                            const t = bot.time?.timeOfDay || 0;
+                            if (t > 0 && t < 12000) {
+                                clearInterval(checkTime);
+                                wakeUp();
+                            }
+                        }, 5000);
+                        setTimeout(() => {
+                            clearInterval(checkTime);
+                            wakeUp();
+                        }, 60000);
+                    } else {
+                        console.log('[NPC] ⚠️ No encontró cama.');
+                    }
+                } catch (err) {
+                    console.log(`[NPC] ❌ Error al dormir: ${err.message}`);
+                }
             }
+        }, 30000);
+    }
 
-            // 2. Buscar un horno cercano
-            const furnace = await findFurnace();
-            if (!furnace) {
-                console.log('[NPC] ⚠️ No encontró horno cercano.');
-                isProcessing = false;
-                return;
-            }
+    // ==================== RUTINA DE COCINA (COMPLETA) ====================
+    async function startCookingRoutine() {
+        if (cookingInterval) clearInterval(cookingInterval);
+        cookingInterval = setInterval(async () => {
+            if (!bot || !bot.entity || isSleeping || isCooking) return;
+            isCooking = true;
+            console.log('[NPC] 🔥 Iniciando rutina de cocina...');
 
-            // 3. Buscar materiales en el cofre
-            const itemsToCook = await getCookableItemsFromChest(chest);
-            const fuel = await getFuelFromChest(chest);
-
-            if (itemsToCook.length === 0) {
-                console.log('[NPC] ⚠️ No hay materiales para cocinar en el cofre.');
-                isProcessing = false;
-                return;
-            }
-
-            if (!fuel) {
-                console.log('[NPC] ⚠️ No hay combustible en el cofre.');
-                isProcessing = false;
-                return;
-            }
-
-            console.log(`[NPC] 📦 Encontrados ${itemsToCook.length} items para cocinar y combustible (${fuel.name})`);
-
-            // 4. Tomar los materiales y combustible del cofre
-            for (const item of itemsToCook) {
-                await bot.moveSlotItem(item.slot, 0, 36);
-                console.log(`[NPC] 📥 Tomado ${item.count}x ${item.name}`);
-            }
-            await bot.moveSlotItem(fuel.slot, 0, 36);
-            console.log(`[NPC] 📥 Tomado ${fuel.count}x ${fuel.name} como combustible`);
-
-            // 5. Cerrar el cofre
-            chest.close();
-
-            // 6. Abrir el horno y cocinar
-            const furnaceBlock = furnace.block;
-            const furnaceWindow = await bot.openFurnace(furnaceBlock);
-
-            // Cocinar cada item
-            for (const item of itemsToCook) {
-                // Verificar si hay espacio en el horno
-                if (furnaceWindow.outputSlot().count >= furnaceWindow.outputSlot().maxStack) {
-                    console.log('[NPC] 📦 Horno lleno, extrayendo...');
-                    await bot.moveSlotItem(furnaceWindow.outputSlot().slot, 0, 36);
-                    console.log(`[NPC] ✅ Extraído del horno`);
+            try {
+                // 1. Buscar horno
+                const furnaceBlock = bot.findBlock({
+                    matching: (block) => block.name === 'furnace' || block.name === 'blast_furnace' || block.name === 'smoker',
+                    maxDistance: 5
+                });
+                if (!furnaceBlock) {
+                    console.log('[NPC] ⚠️ No hay horno cerca.');
+                    isCooking = false;
+                    return;
                 }
 
-                // Verificar combustible
-                if (furnaceWindow.fuelSlot().count === 0) {
-                    const fuelItem = bot.inventory.find(i => CONFIG.fuelItems.includes(i.name));
-                    if (fuelItem) {
-                        await bot.putItem(furnaceWindow, 'fuel', fuelItem.slot, 1);
-                    } else {
-                        console.log('[NPC] ⚠️ Sin combustible, deteniendo cocción');
-                        break;
+                // 2. Buscar todos los cofres cercanos
+                const chestBlocks = bot.findBlocks({
+                    matching: (block) => block.name === 'chest' || block.name === 'trapped_chest' || block.name === 'barrel',
+                    maxDistance: 5,
+                    count: 10
+                });
+
+                if (chestBlocks.length === 0) {
+                    console.log('[NPC] ⚠️ No hay cofres cerca.');
+                    isCooking = false;
+                    return;
+                }
+
+                // 3. Escanear cofres para recolectar materiales y carbón
+                let cookItems = []; // { slot, item, chestBlock }
+                let fuelItems = [];
+                let totalCook = 0;
+                let totalFuel = 0;
+
+                for (const chestBlock of chestBlocks) {
+                    try {
+                        const chest = await bot.openChest(chestBlock);
+                        for (let i = 0; i < chest.inventory.length; i++) {
+                            const item = chest.inventory[i];
+                            if (!item) continue;
+                            if (COOKABLE_ITEMS.includes(item.name)) {
+                                cookItems.push({ slot: i, item, chestBlock });
+                                totalCook += item.count;
+                            }
+                            if (item.name === FUEL_ITEM) {
+                                fuelItems.push({ slot: i, item, chestBlock });
+                                totalFuel += item.count;
+                            }
+                        }
+                        chest.close();
+                    } catch (err) {
+                        console.log(`[NPC] ⚠️ Error abriendo cofre: ${err.message}`);
                     }
                 }
 
-                // Poner material a cocinar
-                await bot.putItem(furnaceWindow, 'input', item.slot, 1);
-                console.log(`[NPC] 🔥 Cocinando ${item.name}...`);
+                if (cookItems.length === 0) {
+                    console.log('[NPC] ⚠️ No hay materiales para cocinar.');
+                    isCooking = false;
+                    return;
+                }
 
-                // Esperar a que se cocine (10-15 segundos)
-                await new Promise(resolve => setTimeout(resolve, 12000 + Math.random() * 3000));
+                if (fuelItems.length === 0) {
+                    console.log('[NPC] ⚠️ No hay carbón disponible.');
+                    isCooking = false;
+                    return;
+                }
 
-                // Extraer resultado
-                const result = furnaceWindow.outputSlot();
+                console.log(`[NPC] 📊 Encontrados ${totalCook} materiales y ${totalFuel} carbón`);
+
+                // 4. Tomar materiales y carbón de los cofres (máximo 8 unidades de cada uno)
+                const MAX_AMOUNT = 8;
+                let takenCook = 0;
+                let takenFuel = 0;
+
+                // Tomar materiales
+                for (const data of cookItems) {
+                    if (takenCook >= MAX_AMOUNT) break;
+                    const toTake = Math.min(data.item.count, MAX_AMOUNT - takenCook);
+                    try {
+                        const chest = await bot.openChest(data.chestBlock);
+                        await bot.moveSlotItem(data.slot, 0, 36, toTake);
+                        chest.close();
+                        takenCook += toTake;
+                        console.log(`[NPC] 📦 Tomados ${toTake}x ${data.item.name} del cofre`);
+                    } catch (err) {
+                        console.log(`[NPC] ⚠️ Error tomando ${data.item.name}: ${err.message}`);
+                    }
+                }
+
+                // Tomar carbón
+                for (const data of fuelItems) {
+                    if (takenFuel >= MAX_AMOUNT) break;
+                    const toTake = Math.min(data.item.count, MAX_AMOUNT - takenFuel);
+                    try {
+                        const chest = await bot.openChest(data.chestBlock);
+                        await bot.moveSlotItem(data.slot, 0, 36, toTake);
+                        chest.close();
+                        takenFuel += toTake;
+                        console.log(`[NPC] 📦 Tomados ${toTake}x ${data.item.name} del cofre`);
+                    } catch (err) {
+                        console.log(`[NPC] ⚠️ Error tomando carbón: ${err.message}`);
+                    }
+                }
+
+                if (takenCook === 0 || takenFuel === 0) {
+                    console.log('[NPC] ⚠️ No se pudo obtener materiales o carbón.');
+                    isCooking = false;
+                    return;
+                }
+
+                // 5. Abrir horno y cocinar
+                const furnace = await bot.openFurnace(furnaceBlock);
+
+                // Limpiar horno si tiene algo
+                if (furnace.outputSlot().count > 0) {
+                    await bot.moveSlotItem(furnace.outputSlot().slot, 0, 36);
+                    console.log(`[NPC] ✅ Extraído ${furnace.outputSlot().name} del horno`);
+                }
+
+                // Poner combustible (todo el carbón que tenemos)
+                const fuelInInventory = bot.inventory.find(item => item.name === FUEL_ITEM);
+                if (fuelInInventory) {
+                    const fuelSlot = bot.inventory.indexOf(fuelInInventory);
+                    await bot.putItem(furnace, 'fuel', fuelSlot, fuelInInventory.count);
+                    console.log(`[NPC] 🔥 Puestos ${fuelInInventory.count}x carbón`);
+                }
+
+                // Poner materiales a cocinar (todos los que tenemos)
+                let cookedCount = 0;
+                let cookedName = '';
+                for (const itemName of COOKABLE_ITEMS) {
+                    const cookItem = bot.inventory.find(item => item.name === itemName);
+                    if (cookItem) {
+                        const slot = bot.inventory.indexOf(cookItem);
+                        await bot.putItem(furnace, 'input', slot, cookItem.count);
+                        cookedCount = cookItem.count;
+                        cookedName = cookItem.name;
+                        console.log(`[NPC] 🔥 Puestos ${cookItem.count}x ${cookItem.name} a cocinar`);
+                        break; // Solo un tipo de material por vez
+                    }
+                }
+
+                furnace.close();
+
+                // 6. Esperar a que se cocine (aprox 10 segundos por item)
+                const waitTime = Math.max(5000, cookedCount * 3000); // 3 segundos por item, mínimo 5 segundos
+                console.log(`[NPC] ⏳ Esperando ${Math.round(waitTime/1000)} segundos...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+
+                // 7. Extraer resultado
+                const furnace2 = await bot.openFurnace(furnaceBlock);
+                const result = furnace2.outputSlot();
                 if (result && result.count > 0) {
                     await bot.moveSlotItem(result.slot, 0, 36);
                     console.log(`[NPC] ✅ Cocido ${result.count}x ${result.name}`);
                 }
-            }
+                furnace2.close();
 
-            // 7. Cerrar el horno
-            furnaceWindow.close();
-            console.log('[NPC] 🔥 Horno cerrado');
-
-            // 8. Guardar los resultados en un cofre
-            await saveItemsToChest();
-
-            console.log('[NPC] ✅ Ciclo de cocina completado');
-
-        } catch (err) {
-            console.log(`[NPC] ❌ Error en proceso de cocina: ${err.message}`);
-        } finally {
-            isProcessing = false;
-        }
-    }
-
-    // ==================== FUNCIONES DE BÚSQUEDA ====================
-
-    async function findChestWithItems() {
-        const chests = bot.findBlocks({
-            matching: (block) => block.name === 'chest' || block.name === 'trapped_chest' || block.name === 'barrel',
-            maxDistance: CONFIG.searchRadius,
-            count: 10
-        });
-
-        for (const chestPos of chests) {
-            try {
-                const chest = await bot.openChest(chestPos);
-                // Verificar si tiene items cocinables o combustible
-                let hasItems = false;
-                for (let i = 0; i < chest.containerItems().length; i++) {
-                    const item = chest.containerItems()[i];
-                    if (item && (CONFIG.cookableItems.includes(item.name) || CONFIG.fuelItems.includes(item.name))) {
-                        hasItems = true;
-                        break;
+                // 8. Guardar el resultado en un cofre
+                const depositChest = bot.findBlock({
+                    matching: (block) => block.name === 'chest' || block.name === 'trapped_chest' || block.name === 'barrel',
+                    maxDistance: 5
+                });
+                if (depositChest) {
+                    const chestDeposit = await bot.openChest(depositChest);
+                    const cookedItem = bot.inventory.find(item => 
+                        Object.values(COOK_RESULT).includes(item.name)
+                    );
+                    if (cookedItem) {
+                        const slot = bot.inventory.indexOf(cookedItem);
+                        await bot.moveSlotItem(slot, 0, chestDeposit.inventory.length);
+                        console.log(`[NPC] 📦 Guardado ${cookedItem.count}x ${cookedItem.name} en cofre`);
                     }
+                    chestDeposit.close();
+                } else {
+                    console.log('[NPC] ⚠️ No hay cofre para guardar.');
                 }
-                if (hasItems) {
-                    return chest;
-                }
-                chest.close();
-            } catch (e) {
-                // Si no se puede abrir, continuar
+
+                console.log('[NPC] ✅ Rutina de cocina completada.');
+
+            } catch (err) {
+                console.log(`[NPC] ❌ Error en rutina de cocina: ${err.message}`);
             }
-        }
-        return null;
+
+            isCooking = false;
+            setTimeout(() => moveRandomly(), 2000);
+
+        }, 30000 + Math.random() * 30000);
     }
 
-    async function findFurnace() {
-        const furnacePos = bot.findBlock({
-            matching: (block) => block.name === 'furnace' || block.name === 'blast_furnace' || block.name === 'smoker',
-            maxDistance: CONFIG.searchRadius
-        });
-        if (furnacePos) {
-            return { block: furnacePos };
-        }
-        return null;
-    }
-
-    async function getCookableItemsFromChest(chest) {
-        const items = [];
-        for (let i = 0; i < chest.containerItems().length; i++) {
-            const item = chest.containerItems()[i];
-            if (item && CONFIG.cookableItems.includes(item.name)) {
-                items.push({ ...item, slot: i });
+    // ==================== DETENER TODO ====================
+    function stopAll() {
+        if (actionInterval) clearInterval(actionInterval);
+        if (moveInterval) clearInterval(moveInterval);
+        if (sleepInterval) clearInterval(sleepInterval);
+        if (cookingInterval) clearInterval(cookingInterval);
+        if (bot) {
+            try { bot.pathfinder.stop(); } catch (e) {}
+            ['forward', 'back', 'left', 'right', 'jump', 'sneak'].forEach(key => {
+                bot.setControlState(key, false);
+            });
+            if (isSleeping) {
+                try { bot.wake(); } catch (e) {}
+                isSleeping = false;
             }
         }
-        return items;
+        isCooking = false;
     }
 
-    async function getFuelFromChest(chest) {
-        for (let i = 0; i < chest.containerItems().length; i++) {
-            const item = chest.containerItems()[i];
-            if (item && CONFIG.fuelItems.includes(item.name)) {
-                return { ...item, slot: i };
-            }
-        }
-        return null;
-    }
-
-    async function saveItemsToChest() {
-        // Buscar items cocinados en el inventario
-        const cookedItems = [];
-        for (let i = 0; i < bot.inventory.length; i++) {
-            const item = bot.inventory[i];
-            if (item && !CONFIG.cookableItems.includes(item.name) && !CONFIG.fuelItems.includes(item.name)) {
-                // Es probable que sea un item cocinado
-                cookedItems.push({ ...item, slot: i });
-            }
-        }
-
-        if (cookedItems.length === 0) {
-            console.log('[NPC] 📭 No hay items cocinados para guardar');
-            return;
-        }
-
-        // Buscar un cofre para guardar
-        const chestPos = CONFIG.outputChestPosition || bot.findBlock({
-            matching: (block) => block.name === 'chest' || block.name === 'trapped_chest' || block.name === 'barrel',
-            maxDistance: CONFIG.searchRadius
-        });
-
-        if (!chestPos) {
-            console.log('[NPC] ⚠️ No encontró cofre para guardar los resultados');
-            return;
-        }
-
-        try {
-            const chest = await bot.openChest(chestPos);
-            for (const item of cookedItems) {
-                await bot.moveSlotItem(item.slot, 0, 36);
-                console.log(`[NPC] 📤 Guardado ${item.count}x ${item.name} en cofre`);
-            }
-            chest.close();
-            console.log('[NPC] 📦 Items guardados en cofre');
-        } catch (err) {
-            console.log(`[NPC] ❌ Error guardando en cofre: ${err.message}`);
-        }
-    }
-
-    console.log('[NPC] 🤖 Bot cocinero listo!');
+    console.log('[NPC] 🤖 Bot cocinero completo listo!');
 }
 
-// Iniciar el bot
 createBot();
