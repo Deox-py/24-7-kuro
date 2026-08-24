@@ -5,13 +5,12 @@ const { GoalBlock } = goals;
 
 const CONFIG = {
     host: 'Fakekuromori.aternos.me',
-    port: 31094, // ⚠️ Revisa que coincida con el puerto activo de Aternos
+    port: 31094, // ⚠️ Actualizar si Aternos cambia el puerto
     username: 'PokeFollador',
     auth: 'offline',
     version: false,
     hideErrors: true,
-    homeRadius: 5,
-    checkTimeoutInterval: 60000
+    homeRadius: 5
 };
 
 let currentBot = null;
@@ -26,6 +25,7 @@ function createBot() {
     const bot = mineflayer.createBot(CONFIG);
     currentBot = bot;
 
+    // Habilitar soporte Forge/Mods
     try {
         autoVersionForge(bot);
     } catch (err) {
@@ -39,7 +39,7 @@ function createBot() {
     let sleepInterval = null;
     let isSleeping = false;
 
-    // Filtro de paquetes de chat para prevenir cierres
+    // Interceptar paquetes de chat para prevenir crashes por mod-messages
     bot._client.on('packet', (data, meta) => {
         if (['chat_message', 'system_chat', 'player_chat'].includes(meta.name)) {
             try {
@@ -49,7 +49,7 @@ function createBot() {
         }
     });
 
-    bot.on('message', () => {});
+    bot.on('message', () => {}); // Prevenir spam en consola si el parser falla
 
     bot.on('connect', () => {
         console.log('[NPC] 🔗 Conectando al servidor...');
@@ -96,50 +96,32 @@ function createBot() {
     });
 
     bot.on('end', (reason) => {
-        console.log(`[NPC] ❌ Desconectado (${reason}). Reintentando en 60s...`);
+        console.log(`[NPC] ❌ Desconectado (${reason}). Reintentando en 30s...`);
         cleanup();
         scheduleReconnect();
     });
 
-    // ---- Lógica Anti-AFK Segura ----
+    // ---- Lógica de Comportamiento ----
 
     function startActions() {
         if (actionInterval) clearInterval(actionInterval);
-        actionInterval = setInterval(async () => {
+        actionInterval = setInterval(() => {
             if (!bot || !bot.entity || isSleeping) return;
 
             const rand = Math.random();
-
-            if (rand < 0.35) {
-                // Salto aleatorio
+            if (rand < 0.3) {
                 bot.setControlState('jump', true);
                 setTimeout(() => {
                     if (bot && bot.setControlState) bot.setControlState('jump', false);
                 }, 300);
                 console.log('[NPC] 🦘 Salto aleatorio.');
-            } else if (rand < 0.70) {
-                // Mirar alrededor
+            } else if (rand < 0.6) {
                 const yaw = (Math.random() - 0.5) * Math.PI * 2;
                 const pitch = (Math.random() - 0.5) * 0.5;
                 bot.look(yaw, pitch, true).catch(() => {});
                 console.log('[NPC] 👀 Miró a su alrededor.');
-            } else {
-                // Inspeccionar bloques cercanos de forma segura (sin abrir inventarios)
-                inspectNearbyBlock();
             }
-        }, 20000 + Math.random() * 10000);
-    }
-
-    function inspectNearbyBlock() {
-        const targetBlock = bot.findBlock({
-            matching: (block) => block.name.includes('chest') || block.name.includes('furnace') || block.name.endsWith('_bed'),
-            maxDistance: 5
-        });
-
-        if (targetBlock) {
-            console.log(`[NPC] 🔍 Inspeccionando ${targetBlock.name}...`);
-            bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5)).catch(() => {});
-        }
+        }, 15000 + Math.random() * 10000);
     }
 
     function moveRandomly() {
@@ -166,7 +148,7 @@ function createBot() {
                 if (dist < 2) {
                     clearInterval(moveInterval);
                     console.log('[NPC] 🟢 Destino alcanzado.');
-                    setTimeout(() => moveRandomly(), 12000 + Math.random() * 10000);
+                    setTimeout(() => moveRandomly(), 10000 + Math.random() * 10000);
                 }
             }, 2000);
         } catch (_) {
@@ -182,8 +164,8 @@ function createBot() {
             const time = bot.time?.timeOfDay || 0;
             if (time >= 13000 && time <= 23000) {
                 const bedBlock = bot.findBlock({
-                    matching: (block) => block.name.endsWith('_bed'),
-                    maxDistance: 4
+                    matching: (block) => block.name.includes('bed'),
+                    maxDistance: 5
                 });
 
                 if (bedBlock) {
@@ -219,7 +201,7 @@ function createBot() {
         setTimeout(() => {
             isReconnecting = false;
             createBot();
-        }, 60000); // Reconecta cada 60s para no saturar Aternos
+        }, 30000);
     }
 }
 
