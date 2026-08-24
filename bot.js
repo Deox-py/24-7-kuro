@@ -1,63 +1,56 @@
 const mineflayer = require('mineflayer');
+// Importamos la función para añadir soporte Forge
+const autoVersionForge = require('minecraft-protocol-forge').autoVersionForge;
 
 function createBot() {
-    const host = 'Fakekuromori.aternos.me';
-    const port = 31094; // CAMBIA ESTE PUERTO POR EL QUE APAREZCA EN ATERNOS AHORA
-    const username = 'PokeFollador';
+    console.log('[NPC] 🚀 Intentando conectar a Fakekuromori.aternos.me...');
 
-    console.log(`[NPC] 🚀 Intentando conectar a ${host}:${port}...`);
-
+    // 1. Creamos el bot. Es CRÍTICO que 'version' esté en 'false'.
     const bot = mineflayer.createBot({
-        host: host,
-        port: port,
-        username: username,
+        host: 'Fakekuromori.aternos.me',
+        port: 31094, // ¡ACTUALIZA ESTE PUERTO CON EL DE ATERNOS!
+        username: 'PokeFollador',
         auth: 'offline',
-        version: '1.21.1',
+        version: false, // ¡NUNCA cambies esto a un número! Debe ser 'false'.
         hideErrors: true
     });
 
-    // Manejo de errores de conexión
+    // 2. ¡ESTA ES LA LÍNEA MÁGICA! Añade el soporte para Forge/NeoForge.
+    // Le decimos que intente auto-detectar los mods del servidor.
+    autoVersionForge(bot._client);
+
+    // --- Eventos del bot (sin cambios) ---
     bot.on('error', (err) => {
+        // ... (tu manejador de errores existente) ...
         if (err.code === 'ECONNRESET') {
-            console.log('[NPC] ❌ El servidor rechazó la conexión (ECONNRESET).');
-            console.log('[NPC] ⚠️ Verifica:');
-            console.log(`  - Que el puerto ${port} sea el correcto (actualízalo si cambió).`);
-            console.log('  - Que el servidor esté ENCENDIDO (verde en Aternos).');
-            console.log('  - Que el modo offline esté ACTIVADO en Aternos.');
-            console.log('[NPC] Reintentando en 30 segundos...');
+            console.log('[NPC] ❌ Error de conexión. El puerto o la IP pueden haber cambiado.');
+            console.log('[NPC] 🔄 Reintentando en 30 segundos...');
             setTimeout(createBot, 30000);
-        } else if (err.name === 'PartialReadError' || err.toString().includes('PartialReadError')) {
+        } else if (err.name === 'PartialReadError') {
             console.log('[NPC] ⚠️ Error de protocolo (mods), ignorando...');
         } else {
             console.log('[NPC] ❌ Error crítico:', err);
         }
     });
 
-    bot.on('connect', () => {
-        console.log('[NPC] 🔗 Conectando al servidor...');
-    });
-
-    bot.on('login', () => {
-        console.log('[NPC] ✅ Conexión establecida con el servidor de Minecraft.');
-    });
-
+    bot.on('connect', () => console.log('[NPC] 🔗 Conectando al servidor...'));
+    bot.on('login', () => console.log('[NPC] ✅ Conexión establecida'));
     bot.on('spawn', () => {
-        console.log('[NPC] 🟢 El bot ha aparecido correctamente en el mapa.');
-        // Acción anti-AFK simple
+        console.log('[NPC] 🟢 El bot ha aparecido en el mapa.');
+        // Anti-AFK: saltar cada 30 segundos
         setInterval(() => {
             if (bot && bot.entity) {
                 bot.setControlState('jump', true);
                 setTimeout(() => bot.setControlState('jump', false), 300);
-                console.log('[NPC] 🔄 Acción anti-AFK (salto)');
+                console.log('[NPC] 🔄 Anti-AFK: salto');
             }
         }, 30000);
     });
 
     bot.on('end', (reason) => {
-        console.log(`[NPC] ❌ Desconectado: ${reason}. Reconectando en 30 segundos...`);
+        console.log(`[NPC] ❌ Desconectado: ${reason}. Reconectando en 30s...`);
         setTimeout(createBot, 30000);
     });
 }
 
-// Iniciar el bot
 createBot();
