@@ -415,19 +415,35 @@ function createBot() {
         }, 30000 + Math.random() * 30000);
     }
 
-    // ==================== DETENER TODO ====================
+    // ==================== DETENER TODO (CORREGIDO) ====================
     function stopAll() {
+        // Limpiar intervalos
         if (actionInterval) clearInterval(actionInterval);
         if (moveInterval) clearInterval(moveInterval);
         if (sleepInterval) clearInterval(sleepInterval);
         if (cookingInterval) clearInterval(cookingInterval);
-        if (bot) {
-            try { bot.pathfinder.stop(); } catch (e) {}
+
+        // Verificar que el bot existe y tiene las funciones necesarias
+        if (bot && typeof bot.setControlState === 'function') {
+            try {
+                bot.pathfinder.stop();
+            } catch (e) {
+                // Ignorar error si pathfinder no está disponible
+            }
+            // Soltar teclas
             ['forward', 'back', 'left', 'right', 'jump', 'sneak'].forEach(key => {
-                bot.setControlState(key, false);
+                try {
+                    bot.setControlState(key, false);
+                } catch (e) {
+                    // Ignorar error si el bot ya no está disponible
+                }
             });
             if (isSleeping) {
-                try { bot.wake(); } catch (e) {}
+                try {
+                    bot.wake();
+                } catch (e) {
+                    // Ignorar error al despertar
+                }
                 isSleeping = false;
             }
         }
