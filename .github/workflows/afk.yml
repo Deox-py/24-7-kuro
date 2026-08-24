@@ -3,7 +3,7 @@ name: Minecraft NPC Bot 24/7
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Permite ejecutar manualmente desde la interfaz de GitHub
+  workflow_dispatch:
 
 jobs:
   run-bot:
