@@ -1,12 +1,11 @@
 const mineflayer = require('mineflayer');
-const autoVersionForge = require('minecraft-protocol-forge').autoVersionForge;
-const pathfinder = require('mineflayer-pathfinder').pathfinder;
-const Movements = require('mineflayer-pathfinder').Movements;
-const { GoalBlock } = require('mineflayer-pathfinder').goals;
+const { autoVersionForge } = require('minecraft-protocol-forge');
+const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
+const { GoalBlock } = goals;
 
 const CONFIG = {
     host: 'Fakekuromori.aternos.me',
-    port: 31094, // ⚠️ ACTUALIZA ESTE PUERTO CADA VEZ QUE CAMBIE
+    port: 31094, // ⚠️ Actualizar si Aternos cambia el puerto
     username: 'PokeFollador',
     auth: 'offline',
     version: false,
@@ -14,9 +13,25 @@ const CONFIG = {
     homeRadius: 5
 };
 
+let currentBot = null;
+let isReconnecting = false;
+
 function createBot() {
-    console.log('[NPC] 🚀 Iniciando bot humano...');
+    if (isReconnecting) return;
+    isReconnecting = true;
+
+    console.log('[NPC] 🚀 Iniciando bot...');
+
     const bot = mineflayer.createBot(CONFIG);
+    currentBot = bot;
+
+    // Habilitar soporte Forge/Mods
+    try {
+        autoVersionForge(bot);
+    } catch (err) {
+        console.log('[NPC] ⚠️ No se pudo aplicar autoVersionForge:', err.message);
+    }
+
     bot.loadPlugin(pathfinder);
 
     let moveInterval = null;
@@ -24,28 +39,38 @@ function createBot() {
     let sleepInterval = null;
     let isSleeping = false;
 
-    // ---- Parche para chat (evita errores de mods) ----
+    // Interceptar paquetes de chat para prevenir crashes por mod-messages
     bot._client.on('packet', (data, meta) => {
-        if (meta.name === 'chat_message' || meta.name === 'system_chat' || meta.name === 'player_chat') {
-            try { console.log(`[CHAT] ${data.message || data.plainMessage || JSON.stringify(data)}`); } catch (_) {}
+        if (['chat_message', 'system_chat', 'player_chat'].includes(meta.name)) {
+            try {
+                const msg = data.message || data.plainMessage || (data.unsignedContent ? JSON.parse(data.unsignedContent) : null);
+                if (msg) console.log(`[CHAT] ${typeof msg === 'object' ? JSON.stringify(msg) : msg}`);
+            } catch (_) {}
         }
     });
-    bot.on('message', () => {});
 
-    // ---- Eventos ----
-    bot.on('connect', () => console.log('[NPC] 🔗 Conectando...'));
-    bot.on('login', () => console.log('[NPC] ✅ Conexión establecida'));
+    bot.on('message', () => {}); // Prevenir spam en consola si el parser falla
+
+    bot.on('connect', () => {
+        console.log('[NPC] 🔗 Conectando al servidor...');
+        isReconnecting = false;
+    });
+
+    bot.on('login', () => console.log('[NPC] ✅ Autenticado y dentro del servidor.'));
 
     bot.on('spawn', () => {
-        console.log('[NPC] 🟢 Bot apareció en el mapa.');
+        console.log('[NPC] 🟢 Bot reapareció en el mapa.');
+
         try {
             const mcData = require('minecraft-data')(bot.version);
             const defaultMove = new Movements(bot, mcData);
             defaultMove.canDig = false;
             defaultMove.scafoldingBlocks = [];
             bot.pathfinder.setMovements(defaultMove);
-            console.log('[NPC] ✅ Pathfinder configurado');
-        } catch (_) {}
+            console.log('[NPC] ✅ Pathfinder configurado correctamente.');
+        } catch (e) {
+            console.log('[NPC] ⚠️ No se pudo inicializar minecraft-data:', e.message);
+        }
 
         setTimeout(() => {
             startActions();
@@ -54,41 +79,47 @@ function createBot() {
         }, 3000);
     });
 
+    bot.on('wake', () => {
+        isSleeping = false;
+        console.log('[NPC] 🌅 El bot se ha despertado.');
+        setTimeout(() => moveRandomly(), 2000);
+    });
+
     bot.on('error', (err) => {
         if (err.code === 'ECONNRESET' || err.code === 'ENOTFOUND') {
-            console.log('[NPC] ❌ Error de conexión. Reintentando...');
-            setTimeout(() => createBot(), 30000);
+            console.log('[NPC] ❌ Error de red / conexión.');
         } else if (err.message?.includes('PartialReadError') || err.message?.includes('unknown chat format')) {
-            console.log('[NPC] ⚠️ Error de mods, ignorando.');
+            console.log('[NPC] ⚠️ Paquete no reconocido (mod/custom payload), ignorando...');
         } else {
-            console.log('[NPC] ❌ Error crítico:', err);
-            setTimeout(() => createBot(), 30000);
+            console.log('[NPC] ❌ Error no controlado:', err.message);
         }
     });
 
     bot.on('end', (reason) => {
-        console.log(`[NPC] ❌ Desconectado: ${reason}. Reconectando en 30s...`);
-        stopAll();
-        setTimeout(() => createBot(), 30000);
+        console.log(`[NPC] ❌ Desconectado (${reason}). Reintentando en 30s...`);
+        cleanup();
+        scheduleReconnect();
     });
 
-    // ---- Funciones ----
+    // ---- Lógica de Comportamiento ----
+
     function startActions() {
         if (actionInterval) clearInterval(actionInterval);
         actionInterval = setInterval(() => {
             if (!bot || !bot.entity || isSleeping) return;
+
             const rand = Math.random();
             if (rand < 0.3) {
                 bot.setControlState('jump', true);
-                setTimeout(() => { if (bot && bot.setControlState) bot.setControlState('jump', false); }, 300);
-                console.log('[NPC] 🦘 Saltó');
+                setTimeout(() => {
+                    if (bot && bot.setControlState) bot.setControlState('jump', false);
+                }, 300);
+                console.log('[NPC] 🦘 Salto aleatorio.');
             } else if (rand < 0.6) {
                 const yaw = (Math.random() - 0.5) * Math.PI * 2;
                 const pitch = (Math.random() - 0.5) * 0.5;
-                if (bot && bot.look) bot.look(yaw, pitch, true);
-                console.log('[NPC] 👀 Miró alrededor');
-            } else {
-                console.log('[NPC] 💤 Descansando...');
+                bot.look(yaw, pitch, true).catch(() => {});
+                console.log('[NPC] 👀 Miró a su alrededor.');
             }
         }, 15000 + Math.random() * 10000);
     }
@@ -98,24 +129,25 @@ function createBot() {
             setTimeout(() => moveRandomly(), 5000);
             return;
         }
+
         const range = CONFIG.homeRadius;
         const pos = bot.entity.position;
-        const x = pos.x + (Math.random() - 0.5) * range * 2;
-        const z = pos.z + (Math.random() - 0.5) * range * 2;
-        const target = { x, y: pos.y, z };
+        const targetX = Math.floor(pos.x + (Math.random() - 0.5) * range * 2);
+        const targetZ = Math.floor(pos.z + (Math.random() - 0.5) * range * 2);
 
         try {
-            bot.pathfinder.setGoal(new GoalBlock(target.x, target.y, target.z));
+            bot.pathfinder.setGoal(new GoalBlock(targetX, pos.y, targetZ));
+
             if (moveInterval) clearInterval(moveInterval);
             moveInterval = setInterval(() => {
                 if (!bot || !bot.entity || isSleeping) {
                     clearInterval(moveInterval);
                     return;
                 }
-                const dist = bot.entity.position.distanceTo(target);
+                const dist = bot.entity.position.distanceTo({ x: targetX, y: pos.y, z: targetZ });
                 if (dist < 2) {
                     clearInterval(moveInterval);
-                    console.log('[NPC] 🟢 Llegó al destino');
+                    console.log('[NPC] 🟢 Destino alcanzado.');
                     setTimeout(() => moveRandomly(), 10000 + Math.random() * 10000);
                 }
             }, 2000);
@@ -128,63 +160,49 @@ function createBot() {
         if (sleepInterval) clearInterval(sleepInterval);
         sleepInterval = setInterval(async () => {
             if (!bot || !bot.entity || isSleeping) return;
+
             const time = bot.time?.timeOfDay || 0;
-            if (time > 13000 && time < 23000) {
-                console.log('[NPC] 🌙 Es de noche, buscando cama...');
-                try {
-                    const bedBlock = bot.findBlock({
-                        matching: (block) => block.name.includes('bed'),
-                        maxDistance: 5
-                    });
-                    if (bedBlock) {
+            if (time >= 13000 && time <= 23000) {
+                const bedBlock = bot.findBlock({
+                    matching: (block) => block.name.includes('bed'),
+                    maxDistance: 5
+                });
+
+                if (bedBlock) {
+                    try {
+                        console.log('[NPC] 🌙 Intentando dormir...');
                         await bot.sleep(bedBlock);
                         isSleeping = true;
-                        console.log('[NPC] 😴 Durmiendo...');
-                        const wakeUp = () => {
-                            if (isSleeping) {
-                                try { if (bot && bot.wake) bot.wake(); } catch (_) {}
-                                isSleeping = false;
-                                console.log('[NPC] 🌅 Despertado');
-                                setTimeout(() => moveRandomly(), 2000);
-                            }
-                        };
-                        const checkTime = setInterval(() => {
-                            if (!bot) { clearInterval(checkTime); return; }
-                            const t = bot.time?.timeOfDay || 0;
-                            if (t > 0 && t < 12000) {
-                                clearInterval(checkTime);
-                                wakeUp();
-                            }
-                        }, 5000);
-                        setTimeout(() => {
-                            clearInterval(checkTime);
-                            wakeUp();
-                        }, 60000);
-                    } else {
-                        console.log('[NPC] ⚠️ No encontró cama.');
+                        console.log('[NPC] 😴 Durmiendo.');
+                    } catch (err) {
+                        console.log('[NPC] ⚠️ No se pudo dormir:', err.message);
                     }
-                } catch (_) {}
+                }
             }
         }, 30000);
     }
 
-    function stopAll() {
+    function cleanup() {
         if (actionInterval) clearInterval(actionInterval);
         if (moveInterval) clearInterval(moveInterval);
         if (sleepInterval) clearInterval(sleepInterval);
+
         if (bot) {
             try { bot.pathfinder.stop(); } catch (_) {}
-            ['forward', 'back', 'left', 'right', 'jump', 'sneak'].forEach(key => {
-                if (bot.setControlState) bot.setControlState(key, false);
+            ['forward', 'back', 'left', 'right', 'jump', 'sneak'].forEach((key) => {
+                try { bot.setControlState(key, false); } catch (_) {}
             });
-            if (isSleeping) {
-                try { if (bot.wake) bot.wake(); } catch (_) {}
-                isSleeping = false;
-            }
         }
     }
 
-    console.log('[NPC] 🤖 Bot humano listo.');
+    function scheduleReconnect() {
+        if (isReconnecting) return;
+        isReconnecting = true;
+        setTimeout(() => {
+            isReconnecting = false;
+            createBot();
+        }, 30000);
+    }
 }
 
 createBot();
