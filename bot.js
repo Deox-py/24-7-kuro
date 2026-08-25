@@ -11,7 +11,10 @@ const CONFIG = {
     version: false,
     hideErrors: true,
     homeRadius: 5,
-    checkTimeoutInterval: 60000
+    checkTimeoutInterval: 60000,
+    plugins: {
+        chat: false // 🛑 Desactiva el parser de chat para evitar crashes por mensajes de jugadores
+    }
 };
 
 let currentBot = null;
@@ -39,7 +42,7 @@ function createBot() {
     let sleepInterval = null;
     let isSleeping = false;
 
-    // Filtro de paquetes de chat para prevenir cierres
+    // Escuchar paquetes de chat en crudo de forma segura sin crashear el bot
     bot._client.on('packet', (data, meta) => {
         if (['chat_message', 'system_chat', 'player_chat'].includes(meta.name)) {
             try {
@@ -48,8 +51,6 @@ function createBot() {
             } catch (_) {}
         }
     });
-
-    bot.on('message', () => {});
 
     bot.on('connect', () => {
         console.log('[NPC] 🔗 Conectando al servidor...');
@@ -89,7 +90,7 @@ function createBot() {
         if (err.code === 'ECONNRESET' || err.code === 'ENOTFOUND') {
             console.log('[NPC] ❌ Error de red / conexión.');
         } else if (err.message?.includes('PartialReadError') || err.message?.includes('unknown chat format')) {
-            console.log('[NPC] ⚠️ Paquete no reconocido (mod/custom payload), ignorando...');
+            console.log('[NPC] ⚠️ Paquete de chat/mod ignorado.');
         } else {
             console.log('[NPC] ❌ Error no controlado:', err.message);
         }
@@ -101,7 +102,7 @@ function createBot() {
         scheduleReconnect();
     });
 
-    // ---- Lógica Anti-AFK Segura ----
+    // ---- Lógica Anti-AFK ----
 
     function startActions() {
         if (actionInterval) clearInterval(actionInterval);
@@ -111,20 +112,17 @@ function createBot() {
             const rand = Math.random();
 
             if (rand < 0.35) {
-                // Salto aleatorio
                 bot.setControlState('jump', true);
                 setTimeout(() => {
                     if (bot && bot.setControlState) bot.setControlState('jump', false);
                 }, 300);
                 console.log('[NPC] 🦘 Salto aleatorio.');
             } else if (rand < 0.70) {
-                // Mirar alrededor
                 const yaw = (Math.random() - 0.5) * Math.PI * 2;
                 const pitch = (Math.random() - 0.5) * 0.5;
                 bot.look(yaw, pitch, true).catch(() => {});
                 console.log('[NPC] 👀 Miró a su alrededor.');
             } else {
-                // Inspeccionar bloques cercanos de forma segura (sin abrir inventarios)
                 inspectNearbyBlock();
             }
         }, 20000 + Math.random() * 10000);
@@ -219,7 +217,7 @@ function createBot() {
         setTimeout(() => {
             isReconnecting = false;
             createBot();
-        }, 60000); // Reconecta cada 60s para no saturar Aternos
+        }, 60000);
     }
 }
 
